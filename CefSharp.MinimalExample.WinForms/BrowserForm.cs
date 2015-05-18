@@ -3,6 +3,7 @@
 // Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 using System;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using CefSharp.MinimalExample.WinForms.Controls;
 using CefSharp.WinForms;
@@ -12,15 +13,22 @@ namespace CefSharp.MinimalExample.WinForms
     public partial class BrowserForm : Form
     {
         private readonly ChromiumWebBrowser browser;
+        private bool jsExecuted;
 
         public BrowserForm()
         {
             InitializeComponent();
+            jsExecuted = false;
 
             Text = "CefSharp";
             WindowState = FormWindowState.Maximized;
+            CefSettings settings = new CefSettings
+            {
+                IgnoreCertificateErrors = true
+            };
+            Cef.Initialize(settings);
 
-            browser = new ChromiumWebBrowser("www.google.com")
+            browser = new ChromiumWebBrowser("dummy:")
             {
                 Dock = DockStyle.Fill,
             };
@@ -35,6 +43,25 @@ namespace CefSharp.MinimalExample.WinForms
             var bitness = Environment.Is64BitProcess ? "x64" : "x86";
             var version = String.Format("Chromium: {0}, CEF: {1}, CefSharp: {2}, Environment: {3}", Cef.ChromiumVersion, Cef.CefVersion, Cef.CefSharpVersion, bitness);
             DisplayOutput(version);
+        }
+
+        public void showMessage() {
+            object result = null;
+
+            var task = browser.EvaluateScriptAsync("(function () { document.getElementById('target').style.backgroundColor='blue'; return 'Success!'; })();");
+            var complete = task.ContinueWith(t => {
+                if (!t.IsFaulted) {
+                    var response = t.Result;
+                    result = response.Success ? (response.Result ?? "null") : response.Message;
+                }
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+            complete.Wait();
+            if (result == null) {
+                MessageBox.Show("I didn't wait for the task to complete!");
+            }
+            else {
+                MessageBox.Show(result.ToString());
+            }
         }
 
         private void OnBrowserConsoleMessage(object sender, ConsoleMessageEventArgs args)
@@ -53,6 +80,12 @@ namespace CefSharp.MinimalExample.WinForms
             SetCanGoForward(args.CanGoForward);
 
             this.InvokeOnUiThreadIfRequired(() => SetIsLoading(!args.CanReload));
+
+            if (!args.IsLoading && !jsExecuted) {
+                jsExecuted = true;
+                browser.RegisterJsObject("myinterface", this);
+                browser.LoadHtml("<html><head></head><body><div id=\"target\" onclick=\"myinterface.showMessage();\" style=\"tezt-align: center; padding: 50px;background-color: red; cursor: pointer;\">Click here</div></body></html>", "http://ciao.local/");
+            }
         }
 
         private void OnBrowserTitleChanged(object sender, TitleChangedEventArgs args)
